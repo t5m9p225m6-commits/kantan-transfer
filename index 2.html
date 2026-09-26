@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>かんたん音源転送</title>
+<style>
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;padding:20px}.wrap{max-width:760px;margin:auto}
+.card{background:white;border-radius:22px;padding:22px;box-shadow:0 8px 30px #0001;margin:14px 0}
+h1{font-size:28px;margin:8px 0}.sub{color:#596579}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button,.btn{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:700;background:#2563eb;color:#fff;margin:6px 0}
+.secondary{background:#e8eef9;color:#183153}.danger{background:#eef2f7;color:#344054}
+textarea{width:100%;min-height:120px;border:1px solid #ccd5e2;border-radius:14px;padding:12px;font-size:12px}
+input[type=file]{width:100%;padding:14px;background:#f7f9fc;border-radius:14px}.status{padding:12px;border-radius:12px;background:#eef6ff;margin:10px 0}
+progress{width:100%;height:18px}audio{width:100%;margin-top:12px}.hide{display:none}.small{font-size:13px;color:#667085}
+@media(max-width:560px){.grid{grid-template-columns:1fr}body{padding:12px}}
+</style>
+</head>
+<body><main class="wrap">
+<div class="card"><h1>🎵 かんたん音源転送</h1><p class="sub">iPhoneなどの音源ファイルをChromebookへ直接送る試作版です。音源をサーバーへ保存しません。</p></div>
+<div id="home" class="card"><h2>この端末では？</h2><div class="grid"><button onclick="receiver()">💻 受け取る</button><button onclick="sender()">📱 送る</button></div><p class="small">試作1号は接続情報をコピーして相手端末へ渡す方式です。次の版でQR接続を目指します。</p></div>
+<div id="app" class="card hide">
+<button class="danger" onclick="location.reload()">← 最初に戻る</button>
+<h2 id="mode"></h2><div id="status" class="status">準備中</div>
+<div id="filebox" class="hide"><input id="file" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac"><button id="sendBtn" disabled>音源を送る</button></div>
+<div id="offerbox" class="hide"><p>① 下の接続情報をコピーして送信側へ渡します。</p><textarea id="offer" readonly></textarea><button class="secondary" onclick="copyText('offer')">接続情報をコピー</button><p>② 送信側から返ってきた応答情報を貼り付けます。</p><textarea id="answerIn" placeholder="応答情報をここに貼り付け"></textarea><button id="applyAnswer">接続する</button></div>
+<div id="answerbox" class="hide"><p>① Chromebook側の接続情報を貼り付けます。</p><textarea id="offerIn" placeholder="接続情報をここに貼り付け"></textarea><button id="makeAnswer">応答情報を作る</button><p>② 作成された応答情報をChromebook側へ返します。</p><textarea id="answer" readonly></textarea><button class="secondary" onclick="copyText('answer')">応答情報をコピー</button></div>
+<div id="progressbox" class="hide"><progress id="progress" max="100" value="0"></progress><div id="pct">0%</div></div>
+<div id="result" class="hide"><h3>受信しました</h3><div id="fname"></div><audio id="audio" controls></audio><a id="download" class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:12px">Chromebookに保存</a></div>
+</div></main>
+<script>
+let pc,dc,meta,chunks=[],received=0;
+const $=id=>document.getElementById(id), status=t=>$('status').textContent=t;
+function show(id){$(id).classList.remove('hide')} function hide(id){$(id).classList.add('hide')}
+async function waitIce(){if(pc.iceGatheringState==='complete')return;await new Promise(r=>{pc.addEventListener('icegatheringstatechange',()=>{if(pc.iceGatheringState==='complete')r()})})}
+function makePC(){pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pc.onconnectionstatechange=()=>status('接続状態: '+pc.connectionState);return pc}
+function setupChannel(c){dc=c;dc.binaryType='arraybuffer';dc.onopen=()=>{status('接続しました');$('sendBtn').disabled=false};dc.onclose=()=>status('接続が終了しました');dc.onerror=()=>status('通信エラーが発生しました');dc.onmessage=receive}
+async function receiver(){hide('home');show('app');$('mode').textContent='💻 Chromebookで受け取る';show('offerbox');makePC();pc.ondatachannel=e=>setupChannel(e.channel);let off=await pc.createOffer();await pc.setLocalDescription(off);await waitIce();$('offer').value=JSON.stringify(pc.localDescription);status('接続情報を送信側へ渡してください')}
+async function sender(){hide('home');show('app');$('mode').textContent='📱 iPhoneから送る';show('answerbox');show('filebox');$('sendBtn').disabled=true;status('Chromebookの接続情報を貼り付けてください')}
+$('makeAnswer').onclick=async()=>{try{makePC();setupChannel(pc.createDataChannel('file'));await pc.setRemoteDescription(JSON.parse($('offerIn').value));let ans=await pc.createAnswer();await pc.setLocalDescription(ans);await waitIce();$('answer').value=JSON.stringify(pc.localDescription);status('応答情報をChromebookへ返してください')}catch(e){status('接続情報を確認してください')}}
+$('applyAnswer').onclick=async()=>{try{await pc.setRemoteDescription(JSON.parse($('answerIn').value));status('接続を開始しています…')}catch(e){status('応答情報を確認してください')}}
+$('sendBtn').onclick=async()=>{let f=$('file').files[0];if(!f)return status('音源ファイルを選んでください');if(!dc||dc.readyState!=='open')return status('まだ接続されていません');show('progressbox');dc.send(JSON.stringify({type:'meta',name:f.name,size:f.size,mime:f.type||'application/octet-stream'}));const size=16*1024;let offset=0;while(offset<f.size){while(dc.bufferedAmount>1024*1024)await new Promise(r=>setTimeout(r,30));let buf=await f.slice(offset,offset+size).arrayBuffer();dc.send(buf);offset+=buf.byteLength;$('progress').value=offset/f.size*100;$('pct').textContent=Math.min(100,Math.round(offset/f.size*100))+'%'}dc.send(JSON.stringify({type:'end'}));status('送信完了')}
+function receive(e){if(typeof e.data==='string'){let m;try{m=JSON.parse(e.data)}catch{return}if(m.type==='meta'){meta=m;chunks=[];received=0;show('progressbox');status('受信中…')}if(m.type==='end')finish();return}chunks.push(e.data);received+=e.data.byteLength;if(meta){let p=received/meta.size*100;$('progress').value=p;$('pct').textContent=Math.min(100,Math.round(p))+'%'}}
+function finish(){let blob=new Blob(chunks,{type:meta.mime});let url=URL.createObjectURL(blob);$('audio').src=url;$('download').href=url;$('download').download=meta.name;$('fname').textContent=meta.name+' ('+Math.round(meta.size/1024)+' KB)';show('result');status('受信完了');$('progress').value=100;$('pct').textContent='100%'}
+async function copyText(id){try{await navigator.clipboard.writeText($(id).value);status('コピーしました')}catch{$(id).select();document.execCommand('copy');status('コピーしました')}}
+</script></body></html>
